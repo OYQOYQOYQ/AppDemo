@@ -21,7 +21,8 @@ from .utils import load_custom_fonts
 
 # 导入系统监控和搜索模块
 from monitor.monitor import init_monitor, get_system_info
-from .mock_monitor import get_mock_system_info
+# 从monitor模块导入真实的系统监控功能
+from monitor.monitor import get_system_info as get_mock_system_info
 from search.search_wrapper import is_c_search_available, search_files, scan_files
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 class SearchResultsWindow(QMainWindow):
     """搜索结果显示窗口"""
+    # 添加关闭信号，用于通知主窗口
+    window_closed = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("搜索结果")
@@ -69,6 +73,12 @@ class SearchResultsWindow(QMainWindow):
         button_layout.addWidget(self.close_button)
         
         layout.addLayout(button_layout)
+    
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        # 发出窗口关闭信号
+        self.window_closed.emit()
+        event.accept()
         
     def set_search_results(self, results, search_time=0.0):
         """设置搜索结果
@@ -188,6 +198,9 @@ class MainWindow(QMainWindow):
         # 创建顶部搜索区
         self.create_search_area()
         
+        # 初始化搜索启用状态为False
+        self.search_enabled = False
+        
         # 创建下方区域
         self.create_bottom_area()
         
@@ -203,15 +216,25 @@ class MainWindow(QMainWindow):
         
         logger.info("Main window initialized")
         
-        # 在后台线程中执行预扫描
+        # 在后台线程中执行预扫描，但只在没有缓存文件时才扫描
         def background_pre_scan():
             try:
-                from search.search_wrapper import pre_scan
-                logger.info("开始执行文件预扫描")
-                file_count = pre_scan()
-                logger.info(f"文件预扫描完成，共扫描 {file_count} 个文件")
+                import os
+                from search.search_wrapper import SearchWrapper
+                
+                # 获取缓存文件路径
+                cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'search', 'cache_files', 'file_cache.bin')
+                
+                # 检查缓存文件是否存在
+                if not os.path.exists(cache_path):
+                    logger.info("缓存文件不存在，开始执行文件预扫描")
+                    from search.search_wrapper import pre_scan
+                    file_count = pre_scan()
+                    logger.info(f"文件预扫描完成，共扫描 {file_count} 个文件")
+                else:
+                    logger.info(f"缓存文件已存在 ({cache_path})，跳过预扫描")
             except Exception as e:
-                logger.error(f"预扫描失败: {e}")
+                logger.error(f"预扫描检查失败: {e}")
         
         # 创建并启动后台线程
         import threading
@@ -220,6 +243,9 @@ class MainWindow(QMainWindow):
         
         # 初始化时显示今日计划
         self.display_file_search_results()
+        
+        # 加载启动设置
+        self.load_settings_on_startup()
     
     def create_search_area(self):
         """创建顶部搜索区域"""
@@ -243,7 +269,7 @@ class MainWindow(QMainWindow):
         
         # 添加搜索功能
         # 回车事件 - 传递参数表明是回车触发
-        self.search_input.returnPressed.connect(lambda: self.on_search(triggered_by_return=True))
+        self.search_input.returnPressed.connect(lambda: self.on_search(triggered_by_return=True) if getattr(self, 'search_enabled', True) else self.statusBar().showMessage("搜索功能已禁用，请在设置中启用", 3000))
         
         # 添加文本变化事件处理，当搜索框为空时重置按钮显示
         self.search_input.textChanged.connect(self.on_search_text_changed)
@@ -294,88 +320,57 @@ class MainWindow(QMainWindow):
         button_layout.setSpacing(6)
         button_layout.setAlignment(Qt.AlignTop)  # 设置按钮布局顶部对齐
         
-        # 创建更多按钮（8个）
+        # 初始化按钮
         self.buttons = []
-        for i in range(1, 9):
-            btn = QPushButton(f"功能{i}")
-            btn.setMinimumHeight(28)  # 减小按钮高度
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)  # 按钮水平方向填满可用空间
-            # 设置OPPO字体，按钮使用适中的字号
-            btn.setFont(QFont(self.fonts['oppo'], 10))
-            btn.clicked.connect(lambda checked, n=i: self.on_button_clicked(n))
-            
-            # 添加底部边框，除了最后一个按钮
-            if i < 8:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        border-bottom: 1px solid #ccc;
-                    }
-                    QPushButton:hover {
-                        background-color: #f5f5f5;
-                    }
-                """)
-            
-            self.buttons.append(btn)
-            button_layout.addWidget(btn)
+        self.init_buttons(button_layout)
         
-        # 设置滚动区域的内容
+        # 将按钮容器设置为滚动区域的widget
         scroll_area.setWidget(scroll_content)
         
-        # 设置按钮框架的布局，将标题放在滚动区域之前
-        scroll_layout = QVBoxLayout(button_frame)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(0)  # 标题和滚动区域之间无间隙
-        scroll_layout.addWidget(button_title)
-        scroll_layout.addWidget(scroll_area)
-        scroll_layout.setStretch(0, 0)  # 标题不拉伸
-        scroll_layout.setStretch(1, 1)  # 滚动区域占据剩余空间
+        # 设置按钮框架的布局，将标题放在滚动区域外部
+        button_frame_layout = QVBoxLayout(button_frame)
+        button_frame_layout.setContentsMargins(0, 0, 0, 0)
+        button_frame_layout.setSpacing(0)
+        button_frame_layout.addWidget(button_title)
+        button_frame_layout.addWidget(scroll_area)
+        button_frame_layout.setStretch(0, 0)  # 标题不拉伸
+        button_frame_layout.setStretch(1, 1)  # 滚动区域占据剩余空间
         
-        # 启用按钮区域的鼠标滚轮事件
-        button_frame.setFocusPolicy(Qt.WheelFocus)
-        scroll_area.setFocusPolicy(Qt.WheelFocus)
+        # 创建右侧信息区
+        self.info_container = QFrame()
         
-        # 2.2 右侧多形态显示区
-        # 创建一个容器放置标题栏和内容区域
-        self.info_container = QWidget()
-        # 添加边框效果，只应用于外部容器
+        # 将左右区域添加到下方布局
+        bottom_layout.addWidget(button_frame, 2)  # 左侧按钮区
+        bottom_layout.addWidget(self.info_container, 3)  # 右侧信息区
+        # 添加边框效果
         self.info_container.setStyleSheet("""
-            QWidget#infoContainer {
+            QFrame {
                 border: 1px solid #ddd;
                 border-radius: 6px;
             }
+            QFrame * {
+                border: none;
+            }
         """)
-        self.info_container.setObjectName("infoContainer")
+        
+        # 创建信息区布局
         container_layout = QVBoxLayout(self.info_container)
-        container_layout.setContentsMargins(0, 0, 0, 0)  # 保持容器边距
+        container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
         
-        # 创建标题栏，包含标题和切换选项
+        # 创建标题栏
         title_bar = QWidget()
-        title_bar.setFixedHeight(45)  # 标题栏高度
         title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(12, 3, 12, 3)
+        title_layout.setContentsMargins(10, 5, 10, 5)
         title_layout.setSpacing(0)
         
-        # 添加左侧复选框（系统信息）
-        self.system_info_check = QCheckBox()  # 不显示文本
-        self.system_info_check.setToolTip("系统信息")  # 设置 tooltip 以便用户了解功能
-        self.system_info_check.toggled.connect(self.on_display_option_changed)
-        title_layout.addWidget(self.system_info_check)
-        
         # 添加标题
-        self.content_title = QLabel("日志信息")
+        self.content_title = QLabel("系统信息")
         self.content_title.setAlignment(Qt.AlignCenter)  # 将标题设置为居中对齐
         # 设置OPPO字体，标题使用更大的字号和加粗
         font = QFont(self.fonts['oppo'], 12, QFont.Bold)
         self.content_title.setFont(font)
         title_layout.addWidget(self.content_title)
-        title_layout.setStretch(1, 1)  # 设置标题区域的拉伸因子，使其居中
-        
-        # 添加右侧复选框（空白）
-        self.empty_check = QCheckBox()  # 不显示文本
-        self.empty_check.setToolTip("空白")  # 设置 tooltip 以便用户了解功能
-        self.empty_check.toggled.connect(self.on_display_option_changed)
-        title_layout.addWidget(self.empty_check)
         
         container_layout.addWidget(title_bar)
         
@@ -450,9 +445,9 @@ class MainWindow(QMainWindow):
         self.content_layout.addWidget(self.system_info_container)
         self.content_layout.addWidget(self.empty_container)
         
-        # 默认显示日志，隐藏其他
-        self.log_container.show()
-        self.system_info_container.hide()
+        # 默认显示系统信息，隐藏其他
+        self.log_container.hide()
+        self.system_info_container.show()
         self.empty_container.hide()
         
         # 初始化系统监控
@@ -461,12 +456,62 @@ class MainWindow(QMainWindow):
         # 重定向日志到日志显示组件
         self.setup_log_handler()
         
-        # 将左右区域添加到下方布局
-        bottom_layout.addWidget(button_frame, 2)  # 左侧按钮区
-        bottom_layout.addWidget(self.info_container, 3)  # 右侧信息区
-        
         # 将下方区域添加到主布局
         self.main_layout.addLayout(bottom_layout, 0)  # 减小下方区域的空间分配
+        
+
+
+    
+    def init_buttons(self, button_layout):
+        """从配置文件初始化按钮"""
+        import os
+        import json
+        
+        # 默认按钮文本列表
+        default_order = ["设置", "功能2", "功能3", "功能4", "功能5", "功能6", "功能7", "功能8"]
+        button_texts = default_order
+        
+        # 尝试从配置文件加载按钮顺序
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "settings.json")
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    if "button_order" in settings and isinstance(settings["button_order"], list):
+                        button_texts = settings["button_order"]
+                        logger.info(f"从配置文件加载按钮顺序: {button_texts}")
+        except Exception as e:
+            logger.error(f"加载按钮顺序失败: {e}")
+        
+        # 创建按钮
+        self.buttons = []
+        for i, text in enumerate(button_texts):
+            btn = QPushButton(text)
+            btn.setMinimumHeight(28)  # 减小按钮高度
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)  # 按钮水平方向填满可用空间
+            # 设置OPPO字体，按钮使用适中的字号
+            btn.setFont(QFont(self.fonts['oppo'], 10))
+            
+            # 为按钮设置ID（从1开始）
+            btn_id = i + 1
+            btn.clicked.connect(lambda checked, n=btn_id: self.on_button_clicked(n))
+            
+            # 添加底部边框，除了最后一个按钮
+            if i < len(button_texts) - 1:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        border-bottom: 1px solid #ccc;
+                    }
+                    QPushButton:hover {
+                        background-color: #f5f5f5;
+                    }
+                """)
+            
+            button_layout.addWidget(btn)
+            self.buttons.append(btn)
+        
+        # 更新搜索项目列表以匹配按钮顺序
+        self.search_items = button_texts.copy()
     
     def setup_log_handler(self):
         """设置日志处理器，将日志输出到UI组件"""
@@ -497,43 +542,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"目录扫描失败: {e}")
 
-    def on_display_option_changed(self):
-        """显示选项切换事件处理"""
-        system_checked = self.system_info_check.isChecked()
-        empty_checked = self.empty_check.isChecked()
-        
-        # 如果系统信息被选中，禁用空白选项
-        if system_checked:
-            self.empty_check.setChecked(False)
-            self.empty_check.setEnabled(False)
-        else:
-            self.empty_check.setEnabled(True)
-        
-        # 如果空白选项被选中，禁用系统信息选项
-        if empty_checked:
-            self.system_info_check.setChecked(False)
-            self.system_info_check.setEnabled(False)
-        else:
-            self.system_info_check.setEnabled(True)
-        
-        # 切换显示内容
-        if system_checked:
-            self.log_container.hide()
-            self.system_info_container.show()
-            self.empty_container.hide()
-            self.content_title.setText("系统信息")
-        elif empty_checked:
-            self.log_container.hide()
-            self.system_info_container.hide()
-            self.empty_container.show()
-            self.content_title.setText("今日计划")
-            # 显示今日计划
-            self.display_file_search_results()
-        else:
-            self.log_container.show()
-            self.system_info_container.hide()
-            self.empty_container.hide()
-            self.content_title.setText("日志信息")
+    # 移除了on_display_option_changed方法，系统信息始终显示
     
     def init_system_monitor(self):
         """初始化系统监控模块"""
@@ -623,7 +632,7 @@ class MainWindow(QMainWindow):
         """初始化搜索数据集"""
         # 仅包含按钮相关内容
         self.search_items = [
-            "功能1", "功能2", "功能3", "功能4", 
+            "设置", "功能2", "功能3", "功能4", 
             "功能5", "功能6", "功能7", "功能8",
             "按钮1", "按钮2", "按钮3", "按钮4", 
             "按钮5", "按钮6", "按钮7", "按钮8"
@@ -637,6 +646,12 @@ class MainWindow(QMainWindow):
         Args:
             triggered_by_return: 是否由回车键触发
         """
+        # 检查搜索功能是否启用
+        if not getattr(self, 'search_enabled', True):
+            self.statusBar().showMessage("搜索功能已禁用，请在设置中启用", 3000)
+            # 即使禁用也允许点击搜索按钮，但不执行搜索操作
+            return
+            
         text = self.search_input.text()
         
         # 如果搜索框为空，显示所有按钮
@@ -704,9 +719,13 @@ class MainWindow(QMainWindow):
             # 在新窗口中显示搜索结果
             if not hasattr(self, "search_results_window") or not self.search_results_window.isVisible():
                 self.search_results_window = SearchResultsWindow(self)
+                # 连接窗口关闭信号
+                self.search_results_window.window_closed.connect(self.on_search_results_closed)
             self.search_results_window.set_search_results(self.file_search_results, total_search_time)
             self.search_results_window.show()
             self.search_results_window.raise_()  # 确保窗口在最前面
+            # 隐藏主窗口
+            self.hide()
         
         # 如果是回车键触发的搜索，根据结果数量执行不同操作
         if triggered_by_return:
@@ -768,9 +787,96 @@ class MainWindow(QMainWindow):
     
     def on_button_clicked(self, button_id):
         """按钮点击事件"""
-        logger.info(f"功能{button_id}被点击")
-        QMessageBox.information(self, "功能按钮", f"你点击了功能{button_id}")
+        if button_id == 1:
+            logger.info("设置按钮被点击")
+            self.open_settings_window()
+        else:
+            logger.info(f"功能{button_id}被点击")
+            QMessageBox.information(self, "功能按钮", f"你点击了功能{button_id}")
     
+    def open_settings_window(self):
+        """打开设置窗口"""
+        from ui.views.settings_window import SettingsWindow
+        
+        # 检查设置窗口是否已存在，如果存在则显示，否则创建新窗口
+        if not hasattr(self, "settings_window") or not self.settings_window.isVisible():
+            self.settings_window = SettingsWindow(self)
+            # 连接主题变化信号
+            self.settings_window.theme_changed.connect(self.apply_theme)
+            # 连接搜索功能状态变化信号
+            self.settings_window.search_enabled_changed.connect(self.update_search_enabled)
+        
+        self.settings_window.show()
+        self.settings_window.raise_()  # 确保窗口在最前面
+    
+    def apply_theme(self, theme):
+        """应用主题设置
+        
+        Args:
+            theme: 主题类型 ('system', 'light', 'dark')
+        """
+        logger.info(f"应用主题: {theme}")
+        
+        # 获取对应的样式表
+        from ui.utils import get_theme_stylesheet
+        stylesheet = get_theme_stylesheet(theme)
+        
+        # 应用样式表到整个应用
+        self.setStyleSheet(stylesheet)
+        
+        # 应用到所有子窗口
+        for window in self.findChildren(self.__class__.__base__):
+            if window != self and hasattr(window, 'objectName') and window.objectName() not in ['central_widget']:
+                window.setStyleSheet(stylesheet)
+    
+    def update_search_enabled(self, enabled):
+        """更新搜索功能启用状态"""
+        logger.info(f"更新搜索功能状态: {'启用' if enabled else '禁用'}")
+        
+        # 保存状态到实例变量
+        self.search_enabled = enabled
+        
+        # 保留其他UI元素的启用状态，但始终允许搜索按钮可点击
+        if hasattr(self, 'search_button'):
+            self.search_button.setEnabled(True)  # 始终允许点击搜索按钮
+        
+        # 如果禁用搜索功能，清空搜索框
+        if not enabled and hasattr(self, 'search_input'):
+            self.search_input.clear()
+            # 可以在这里添加显示提示信息的逻辑
+            self.statusBar().showMessage("搜索功能已禁用，请在设置中启用", 3000)
+    
+    def load_settings_on_startup(self):
+        """启动时加载设置"""
+        try:
+            import os
+            import json
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "settings.json")
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                
+                # 应用保存的主题设置
+                if "theme" in settings:
+                    self.apply_theme(settings["theme"])
+                
+                # 应用搜索功能设置
+                if "search_enabled" in settings:
+                    self.update_search_enabled(settings["search_enabled"])
+                
+                logger.info("启动设置已加载")
+        except Exception as e:
+            logger.error(f"加载启动设置失败: {e}")
+            # 使用默认设置
+            pass
+    
+    def on_search_results_closed(self):
+        """处理搜索结果窗口关闭事件"""
+        logger.info("搜索结果窗口已关闭，显示主窗口")
+        # 显示主窗口
+        self.show()
+        
     def closeEvent(self, event):
         """窗口关闭事件"""
         # 停止定时器

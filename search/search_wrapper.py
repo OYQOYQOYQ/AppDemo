@@ -26,9 +26,15 @@ class SearchWrapper:
         self.file_cache = []  # 存储扫描到的文件路径
         self.scan_lock = threading.Lock()  # 线程安全锁
         self.is_scanning = False  # 扫描状态标记
-        self.cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'file_cache.bin')  # 缓存文件路径（二进制格式）
+        # 获取缓存文件目录路径
+        cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache_files')
+        # 确保缓存目录存在
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+        
+        self.cache_file = os.path.join(cache_dir, 'file_cache.bin')  # 缓存文件路径（二进制格式）
         self.search_history = {}  # 搜索历史记录
-        self.history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'search_history.json')  # 搜索历史文件路径
+        self.history_file = os.path.join(cache_dir, 'search_history.bin')  # 搜索历史文件路径（二进制格式）
         self._load_cache()  # 加载缓存
         self._load_search_history()  # 加载搜索历史
         
@@ -239,23 +245,36 @@ class SearchWrapper:
     
     def _save_search_history(self):
         """
-        将搜索历史保存到JSON文件
+        将搜索历史保存为二进制文件
         """
         try:
-            with open(self.history_file, 'w', encoding='utf-8') as f:
-                json.dump(self.search_history, f, ensure_ascii=False, indent=2)
+            history_data = {
+                'timestamp': datetime.datetime.now().isoformat(),
+                'history_count': len(self.search_history),
+                'history': self.search_history
+            }
+            # 使用pickle保存为二进制文件
+            with open(self.history_file, 'wb') as f:
+                pickle.dump(history_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"搜索历史已保存到 {self.history_file}")
         except Exception as e:
             print(f"保存搜索历史失败: {e}")
     
     def _load_search_history(self):
         """
-        从JSON文件加载搜索历史
+        从二进制文件加载搜索历史
         """
         try:
             if os.path.exists(self.history_file):
-                with open(self.history_file, 'r', encoding='utf-8') as f:
-                    self.search_history = json.load(f)
+                # 使用pickle加载二进制文件
+                with open(self.history_file, 'rb') as f:
+                    history_data = pickle.load(f)
+                self.search_history = history_data.get('history', {})
                 print(f"已从缓存加载 {len(self.search_history)} 条搜索历史")
+                # 打印缓存时间
+                timestamp = history_data.get('timestamp', '')
+                if timestamp:
+                    print(f"历史缓存时间: {timestamp}")
         except Exception as e:
             print(f"加载搜索历史失败: {e}")
             self.search_history = {}
@@ -333,10 +352,7 @@ class SearchWrapper:
     
     def _load_library(self):
         """加载编译好的C动态链接库"""
-        # 获取当前文件所在目录
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # 根据操作系统确定DLL文件名
+        # 使用项目中c_library/libs目录的绝对路径
         if sys.platform.startswith('win'):
             dll_name = 'search.dll'
         elif sys.platform.startswith('darwin'):
@@ -344,7 +360,7 @@ class SearchWrapper:
         else:
             dll_name = 'libsearch.so'
         
-        self.dll_path = os.path.join(current_dir, dll_name)
+        self.dll_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'c_library', 'libs', dll_name)
         
         # 尝试加载库
         try:
@@ -365,8 +381,7 @@ class SearchWrapper:
         加载C语言实现的目录扫描库
         """
         try:
-            # 确定DLL文件的路径
-            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 使用项目中c_library/libs目录的绝对路径
             if sys.platform.startswith('win'):
                 dll_name = 'directory_scanner.dll'
             elif sys.platform.startswith('darwin'):
@@ -374,7 +389,7 @@ class SearchWrapper:
             else:
                 dll_name = 'libdirectory_scanner.so'
             
-            dll_path = os.path.join(current_dir, dll_name)
+            dll_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'c_library', 'libs', dll_name)
             
             if not os.path.exists(dll_path):
                 print(f"目录扫描库文件不存在: {dll_path}")
