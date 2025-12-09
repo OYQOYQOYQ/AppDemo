@@ -318,12 +318,12 @@ int levenshtein_distance(const char* s1, const char* s2) {
         for (int j = 1; j <= len2; j++) {
             // 对于UTF-8，我们按字节比较，但对于ASCII字符，我们大小写不敏感
             int cost = 1;
-            if (s1[i-1] < 0x80 && s2[j-1] < 0x80) {
+            if ((unsigned char)s1[i-1] < 0x80 && (unsigned char)s2[j-1] < 0x80) {
                 // ASCII字符，大小写不敏感比较
-                cost = (to_lower(s1[i-1]) == to_lower(s2[j-1])) ? 0 : 1;
+                cost = (to_lower((unsigned char)s1[i-1]) == to_lower((unsigned char)s2[j-1])) ? 0 : 1;
             } else {
                 // UTF-8多字节字符，直接比较字节
-                cost = (s1[i-1] == s2[j-1]) ? 0 : 1;
+                cost = ((unsigned char)s1[i-1] == (unsigned char)s2[j-1]) ? 0 : 1;
             }
             
             // 计算最小代价

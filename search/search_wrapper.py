@@ -295,7 +295,7 @@ class SearchWrapper:
             with self.scan_lock:
                 if not self.file_cache:
                     print("缓存为空，开始扫描")
-                    files = self.scan_files("C:/", max_depth=depth, allowed_extensions=include_extensions)
+                    files = self.scan_files("C:/" if os.name == 'nt' else "/", max_depth=depth, allowed_extensions=include_extensions)
                 else:
                     print(f"使用缓存文件，共 {len(self.file_cache)} 个文件")
                     files = self.file_cache.copy()
@@ -313,7 +313,7 @@ class SearchWrapper:
         # 如果使用缓存搜索且没有找到结果，尝试扫描硬盘实时搜索
         if not results and not directory:
             print("缓存中未找到结果，开始扫描硬盘实时搜索...")
-            realtime_files = self.scan_files("C:/", max_depth=depth, allowed_extensions=include_extensions)
+            realtime_files = self.scan_files("C:/" if os.name == 'nt' else "/", max_depth=depth, allowed_extensions=include_extensions)
             realtime_indices = self.search(realtime_files, keyword, use_fuzzy=use_fuzzy, max_distance=max_distance)
             results = [realtime_files[i] for i in realtime_indices]
             

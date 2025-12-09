@@ -1,11 +1,11 @@
 # Mini App
 
-一个使用PySide6框架开发的小型桌面应用程序，支持跨平台运行（Windows、macOS、Linux）。
+一个使用 PySide6 开发的小型桌面应用，支持跨平台运行（Windows、macOS、Linux）。核心搜索与目录扫描使用 C 实现并通过 `ctypes` 调用。
 
 ## 项目结构
 
 ```
-miniapp/
+AppDemo/
 ├── main.py              # 主程序入口
 ├── requirements.txt     # 项目依赖
 ├── ui/                  # UI组件模块
@@ -27,8 +27,9 @@ miniapp/
 │   └── icons/           # 图标文件
 ├── search/              # 搜索功能模块
 │   ├── __init__.py
-│   ├── search_wrapper.py # 搜索功能封装
-│   └── search.dll       # 搜索功能动态链接库（Windows）
+│   ├── search_wrapper.py # C 动态库加载与搜索封装
+│   ├── libsearch.*       # 搜索动态库（平台自动命名）
+│   └── libdirectory_scanner.* # 目录扫描动态库（平台自动命名）
 ├── c_library/           # C语言实现的核心功能
 │   ├── search.c         # 搜索算法实现
 │   ├── directory_scanner.c # 目录扫描实现
@@ -54,27 +55,33 @@ miniapp/
 
 ### 前提条件
 
-- Python 3.8 或更高版本
+- Python 3.9 或更高版本
 - pip 包管理器
-- GCC编译器（用于编译C语言代码，Windows平台可使用MinGW）
+- C 编译器（macOS 建议 Xcode CommandLineTools；Windows 可用 MinGW 或 MSVC）
 
 ### 安装步骤
 
 1. 克隆或下载项目到本地
 
-2. 安装所需依赖：
+2. 创建虚拟环境并安装依赖（使用国内源示例：清华镜像）：
 
    ```bash
-   cd miniapp
-   pip install -r requirements.txt
+   cd AppDemo
+   python3 -m venv .venv
+   . .venv/bin/activate
+   python -m pip install -U pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
+   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
    ```
 
-3. 编译C语言库（可选，已提供预编译的动态链接库）：
+3. 编译 C 动态库（首次或修改 C 源码后执行）：
 
    ```bash
-   cd c_library
-   python build_search_lib.py
+   python3 c_library/build_search_lib.py
    ```
+   编译脚本会根据平台生成并复制动态库到 `search/` 目录：
+   - Windows: `search.dll` 与 `directory_scanner.dll`
+   - macOS: `libsearch.dylib` 与 `libdirectory_scanner.dylib`
+   - Linux: `libsearch.so` 与 `libdirectory_scanner.so`
 
 ## 使用方法
 
@@ -83,16 +90,15 @@ miniapp/
 在项目根目录下执行以下命令：
 
 ```bash
+. .venv/bin/activate
 python main.py
 ```
 
-### 跨平台运行
+### 跨平台运行与行为
 
-应用程序已优化，可以在不同平台上运行：
-
-- **Windows**: 直接运行 `python main.py`
-- **macOS**: 直接运行 `python3 main.py`
-- **Linux**: 直接运行 `python3 main.py`
+- Windows/macOS/Linux 均可运行；依赖与动态库加载由平台自动处理
+- 目录扫描默认根目录：Windows 使用各盘符，macOS/Linux 使用 `/`
+- 打开文件夹行为：Windows 使用 `os.startfile`；macOS 使用 `open`；Linux 使用 `xdg-open`
 
 ### 应用程序操作
 
@@ -159,19 +165,14 @@ python main.py
 4. 在主程序中集成新功能
 5. 确保新功能支持跨平台运行
 
-### 编译C语言库
+### 编译 C 语言库
 
 如果修改了C语言源代码，需要重新编译：
 
 ```bash
-cd c_library
-python build_search_lib.py
+python3 c_library/build_search_lib.py
 ```
-
-编译脚本会根据当前平台生成相应的动态链接库：
-- Windows: `search.dll` 和 `directory_scanner.dll`
-- macOS: `libsearch.dylib` 和 `libdirectory_scanner.dylib`
-- Linux: `libsearch.so` 和 `libdirectory_scanner.so`
+生成的动态库将自动复制到 `search/` 以便 Python 加载。
 
 ## 故障排除
 
@@ -206,12 +207,10 @@ python build_search_lib.py
 
 ### 最新更新
 
-- 实现了跨平台支持（Windows、macOS、Linux）
-- 重构了项目结构，优化了资源管理
-- 改进了文件搜索功能的性能
-- 添加了系统监控功能
-- 优化了UI界面和交互体验
-- 修复了各种bug和兼容性问题
+- 修复非 Windows 默认扫描路径为 `/`
+- 按平台打开文件夹（Windows/macOS/Linux）
+- 编译脚本同时生成两库并自动复制到 `search/`
+- 修复 C 代码 `char` 比较导致的编译警告
 
 ## 许可证
 

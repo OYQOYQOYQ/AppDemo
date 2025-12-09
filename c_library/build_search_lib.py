@@ -13,68 +13,62 @@ def build_library():
     # 获取当前目录
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # C源文件和头文件
-    source_files = ['search.c', 'directory_scanner.c']
-    header_files = ['search.h', 'directory_scanner.h']
+    # C源文件
+    source_search = 'search.c'
+    source_scanner = 'directory_scanner.c'
+    header_files = ['search.h']
     
     # 根据平台设置输出文件名和编译命令
     if platform.system() == 'Windows':
-        output_name = 'search.dll'
+        outputs = ['search.dll', 'directory_scanner.dll']
         compiler = 'gcc' if check_command('gcc') else 'cl'
-        
         if compiler == 'gcc':
-            cmd = [
-                'gcc',
-                '-shared',
-                '-o', output_name,
-                '-Wl,--out-implib,libsearch.a',
-                '-Wl,--export-all-symbols',
-                '-Wl,--enable-auto-import',
-                '-O2',
-                *source_files
+            cmds = [
+                ['gcc', '-shared', '-o', outputs[0], '-O2', source_search],
+                ['gcc', '-shared', '-o', outputs[1], '-O2', source_scanner],
             ]
-        else:  # MSVC cl
-            cmd = [
-                'cl',
-                '/LD',
-                '/Fe:' + output_name,
-                '/Ox',
-                *source_files
+        else:
+            cmds = [
+                ['cl', '/LD', '/Fe:' + outputs[0], '/Ox', source_search],
+                ['cl', '/LD', '/Fe:' + outputs[1], '/Ox', source_scanner],
             ]
     elif platform.system() == 'Darwin':
-        output_name = 'libsearch.dylib'
-        cmd = [
-            'gcc',
-            '-shared',
-            '-o', output_name,
-            '-fPIC',
-            '-O2',
-            *source_files
+        outputs = ['libsearch.dylib', 'libdirectory_scanner.dylib']
+        cmds = [
+            ['cc', '-dynamiclib', '-o', outputs[0], '-fPIC', '-O2', source_search],
+            ['cc', '-dynamiclib', '-o', outputs[1], '-fPIC', '-O2', source_scanner],
         ]
-    else:  # Linux
-        output_name = 'libsearch.so'
-        cmd = [
-            'gcc',
-            '-shared',
-            '-o', output_name,
-            '-fPIC',
-            '-O2',
-            *source_files
+    else:
+        outputs = ['libsearch.so', 'libdirectory_scanner.so']
+        cmds = [
+            ['gcc', '-shared', '-o', outputs[0], '-fPIC', '-O2', source_search],
+            ['gcc', '-shared', '-o', outputs[1], '-fPIC', '-O2', source_scanner],
         ]
     
     # 检查源文件是否存在
-    for file in source_files + header_files:
+    for file in [source_search, source_scanner] + header_files:
         if not os.path.exists(os.path.join(current_dir, file)):
             print(f"错误: 文件不存在: {file}")
             return False
     
     # 执行编译命令
-    print(f"开始编译搜索库: {output_name}")
-    print(f"编译命令: {' '.join(cmd)}")
-    
     try:
-        subprocess.run(cmd, cwd=current_dir, check=True)
-        print(f"编译成功! 输出文件: {os.path.join(current_dir, output_name)}")
+        for cmd in cmds:
+            print(f"编译命令: {' '.join(cmd)}")
+            subprocess.run(cmd, cwd=current_dir, check=True)
+        for output_name in outputs:
+            print(f"编译成功! 输出文件: {os.path.join(current_dir, output_name)}")
+        search_dir = os.path.join(os.path.dirname(current_dir), 'search')
+        if os.path.isdir(search_dir):
+            for output_name in outputs:
+                src = os.path.join(current_dir, output_name)
+                dst = os.path.join(search_dir, output_name)
+                try:
+                    import shutil
+                    shutil.copy2(src, dst)
+                    print(f"已复制到: {dst}")
+                except Exception as e:
+                    print(f"复制失败: {e}")
         return True
     except subprocess.CalledProcessError as e:
         print(f"编译失败! 错误代码: {e.returncode}")

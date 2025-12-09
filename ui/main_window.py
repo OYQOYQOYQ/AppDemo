@@ -5,6 +5,8 @@
 """
 
 import os
+import sys
+import subprocess
 import logging
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QCheckBox,
@@ -103,7 +105,12 @@ class SearchResultsWindow(QMainWindow):
             folder_path = os.path.dirname(file_path)
             logger.info(f"尝试打开文件所在文件夹: {folder_path}")
             try:
-                os.startfile(folder_path)  # 在Windows上打开文件夹
+                if sys.platform.startswith('win'):
+                    os.startfile(folder_path)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', folder_path], check=False)
+                else:
+                    subprocess.run(['xdg-open', folder_path], check=False)
             except Exception as e:
                 logger.error(f"打开文件夹失败: {e}")
                 QMessageBox.warning(self, "错误", f"无法打开文件夹: {folder_path}")
